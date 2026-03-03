@@ -234,30 +234,14 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(
         llm=google.realtime.RealtimeModel(
-        model="gemini-2.5-flash-native-audio-preview-12-2025",
-        # voice="Autonoe",
-        voice="Leda",
-        proactivity=True,
-        temperature=0.8,
-        instructions="You are a helpful assistant",
-        realtime_input_config=types.RealtimeInputConfig(
-        automatic_activity_detection=types.AutomaticActivityDetection(
-          # 1. Turn Gemini's built-in VAD back ON
-        disabled=False, 
-        
-        # 2. THE LATENCY KILLER: How long to wait in silence before replying
-        silence_duration_ms=300, 
-        
-        # 3. How quickly it decides the user has STARTED speaking
-        prefix_padding_ms=20,
-        
-        # 4. Sensitivity tunings
-        start_of_speech_sensitivity="START_SENSITIVITY_HIGH",
-        end_of_speech_sensitivity="END_SENSITIVITY_HIGH",
-        
-      ),
-   ),   
-    ),)
+            model="gemini-2.5-flash-native-audio-preview-12-2025",
+            voice="Leda",
+            temperature=0.8,
+            instructions="You are a helpful assistant",
+        ),
+        preemptive_generation=True,
+        turn_detection=MultilingualModel(),
+    )
 
     from livekit.agents.voice.events import AgentState as VoiceAgentState
     from livekit.agents.llm.realtime import RealtimeError
