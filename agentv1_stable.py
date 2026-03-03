@@ -1,8 +1,6 @@
-﻿import os
+import os
 import json
 import logging
-import asyncio
-import time
 from typing import Annotated
 from dotenv import load_dotenv
 from livekit import api
@@ -29,60 +27,12 @@ from livekit.plugins import (
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.plugins import google, deepgram, silero
 from google.genai import types
-from google.genai.errors import APIError
 from livekit.agents.beta.tools import EndCallTool
 
 logger = logging.getLogger("agent-dummyCode")
 
-# Mask Livekit's noisy internal Realtime errors that leak past try-except blocks
-class SuppressLivekitNudgeTraceback(logging.Filter):
-    def __init__(self):
-        super().__init__()
-        self.active_session = None
-
-    def filter(self, record):
-        if record.levelno >= logging.ERROR:
-            msg = record.getMessage()
-            if "Error in _realtime_reply_task" in msg:
-                return False
-            if "error in receive task: 1008" in msg:
-                # If we have an active session, use this logger intercept to trigger an emergency nudge
-                if self.active_session:
-                    logger.warning("[LOGGER RECOVERY] Google Gemini forcibly closed the socket (1008 Policy Violation). Triggering rapid backup nudge in 2 seconds...")
-                    
-                    async def global_quick_recovery():
-                        await asyncio.sleep(2.0)
-                        try:
-                            await self.active_session.generate_reply(
-                                instructions="The user has been silent for a while. Ask them a short, polite question to check if they are still there and if they need help.",
-                                allow_interruptions=True,
-                            )
-                        except Exception:
-                            pass
-                    
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(global_quick_recovery())
-                    except RuntimeError:
-                        pass # No running event loop
-                        
-                return False
-        return True
-
-nudge_filter = SuppressLivekitNudgeTraceback()
-logging.getLogger("livekit.agents").addFilter(nudge_filter)
-logging.getLogger("livekit.plugins.google").addFilter(nudge_filter)
-
 load_dotenv(".env.local")
 
-# Load services once at startup for high-speed access
-try:
-    with open(os.path.join(os.path.dirname(__file__), "services.json"), 'r', encoding='utf-8') as f:
-        SERVICES = json.load(f)
-    logger.info(f"Loaded {len(SERVICES)} services into memory.")
-except Exception as e:
-    logger.error(f"Failed to load services.json: {e}")
-    SERVICES = []
     
 class DefaultAgent(Agent):
     def __init__(self) -> None:
@@ -119,8 +69,7 @@ End of rules."
 * **No Echoing:** **Do not repeat the customer's statements back to them.** Acknowledge simply with "Right", "Got it", or "I understand", and move forward.
 
 ## Important rules
-- Dont tell services pricing until user ask, just keep with yourself and tell when asked.
-- Only consider valid inputs to move to the next steps. If anything confusing ask or clarify with the user.
+- You can use tools to get the information related too
 - Always use indian accent when seapking in english or in hindi.
 - Talk to the point with the customer. 
 - Always never fabricate answers. 
@@ -131,16 +80,8 @@ End of rules."
 - Always try to understand the user's intent and provide the most relevant information.
 - If customer says no, allways try to tell them about the offers and discounts.
 - Never tell the price of the services until users ask.
-- **CRITICAL TOOL RULE**: If you call a tool and it returns an error or "No services found", you MUST NOT stay silent. You MUST immediately reply to the user apologizing that you couldn't find the information, and ask if they need anything else.
 - Below privded script are not mandatory to follow, you can change them as per the conversation.
 - Conversation should feel natural and human-like.
-
-** Tool call rules **
-- Step 1: ALWAYS use `search_services_summary` first to get a quick visual of available options matching the user's intent. Do not guess prices.
-- Step 2: Pitch 1 or 2 options from the summary to the user.
-- Step 3: ONLY use `get_service_details` if the user specifically asks "What's in that?", "What are the benefits?", or "How long does it take?" about a specific service.
-- Never read out raw JSON or formatting symbols to the user. Speak naturally.
-
 
 **CORE STRATEGIES (THE "BOT LOGIC")**
 
@@ -204,6 +145,7 @@ End of rules."
 
 * **GREEN ZONE (Must Do):**
 * Acknowledge quickly ("Got it", "Right", "I understand").
+* Know the Hero prices: Korean Facial (₹1350), Rica Waxing (₹750), Platform Fee (~₹100).
 * Always anchor the "0120" area code before hanging up.
 * **Crucial:** Always use the term **"cash and carry"** when referring to paying later (never use the word "advance").
 
@@ -221,76 +163,60 @@ End of rules."
 
 
     @function_tool(
-            name="search_services_summary",
-            description="Search for salon services and get a concise list of matching options (Title, Price, Time). Use this FIRST when a user asks about any service or prices to get an overview without reading long descriptions. ALWAYS use short keywords (e.g. 'Rica Wax', 'Facial')."
+            name="search_services",
+            description="Search for salon services, waxing, message services and their prices, and approximate time taking. Use this when the user asks about specific services or their prices. STRICTLY use short keywords ONLY (e.g. 'Rica Wax', 'Facial', 'Manicure'). Never submit questions or long phrases."
         )
-    async def search_services_summary(
+    async def search_services(
         self,
         query: Annotated[
             str,
-            "A short keyword representing the primary service to search for (e.g. 'waxing', 'facial'). NEVER pass full sentences."
+            "A single, short keyword representing the primary service or category to search for (e.g. 'waxing', 'threading', 'facial', 'spa'). NEVER pass full sentences or multiple concepts at once."
         ]
     ):
             """
-            Search the pre-loaded JSON services using fuzzy matching for high speed and relevance.
+            Search the services markdown file for matching entries, specifically looking in the Category/Subcategory fields.
             """
-            logger.info(f"Summary search for: {query}")
+            logger.info(f"Searching services for: {query}")
             try:
-                from thefuzz import process
-                
-                # Global SERVICES config should be loaded in agent init or globally
-                # We extract just the titles to match against
-                titles = [s["Service title"] for s in SERVICES]
-                
-                # Get top 15 fuzzy matches based on title
-                best_matches = process.extract(query, titles, limit=15)
-                
-                results = []
-                for match_title, score in best_matches:
-                    # Filter out low relevance matches (adjust threshold as needed, e.g., 60)
-                    if score < 50:
-                        continue
-                        
-                    # Find the full service dict for this title
-                    for s in SERVICES:
-                        if s["Service title"] == match_title:
-                            # Return highly compressed string to save LLM tokens
-                            results.append(f"- {s['Service title']} | {s['Category']} | {s['Basic total cost']} | {s['Approx time']}")
-                            break
-                            
-                if not results:
-                    return f"No services found matching '{query}'. Try a shorter or different keyword."
-                
-                return f"Top matched services for '{query}':\n" + "\n".join(results) + "\n\n(If the user asks for more details on a specific service from this list, use the 'get_service_details' tool with the exact Service title)."
-                
-            except Exception as e:
-                logger.error(f"Error in summary search: {e}")
-                return f"Error: Failed to search services. {e}"
+                # Assuming services.md is in the same directory as agent.py or we use the absolute path for safety
+                md_path = os.path.join(os.path.dirname(__file__), "services.md")
+                if not os.path.exists(md_path):
+                    return "Error: Services file not found."
 
-    @function_tool(
-            name="get_service_details",
-            description="Get the full, extensive details for a SPECIFIC service (including benefits, procedure, aftercare, and products used). Use this ONLY after providing a summary, and only when the user explicitly asks for more details about a specific service."
-        )
-    async def get_service_details(
-        self,
-        service_title: Annotated[
-            str,
-            "The EXACT 'Service title' obtained from the search_services_summary tool (e.g., 'Rollover Remedy')."
-        ]
-    ):
-            """
-            Fetch the complete text details for a single matched service.
-            """
-            logger.info(f"Fetching details for: {service_title}")
-            try:
-                for s in SERVICES:
-                    if s["Service title"].lower() == service_title.lower():
-                        return f"Full details for {service_title}:\n{s['Full details']}"
+                results = []
+                with open(md_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    services = content.split("## ")
+                    
+                    for service in services:
+                        if not service.strip(): continue
                         
-                return f"Error: Could not find exact details for '{service_title}'. Please ensure you are using the exact title from the summary list."
+                        # Extract the Category line to see if the query matches the subcategory specifically
+                        lines = service.strip().split('\n')
+                        category_line = ""
+                        for line in lines:
+                            if line.startswith("- Category:"):
+                                category_line = line.lower()
+                                break
+                        
+                        # Check if query matches the category exactly or is in the general service body
+                        if query.lower() in category_line:
+                            # Higher priority match if it's in the category
+                            results.insert(0, "## " + service.strip())
+                        elif query.lower() in service.lower():
+                            results.append("## " + service.strip())
+                
+                if not results:
+                    return f"No services found matching '{query}'."
+                
+                # Limit results to avoid context overflow if query is too broad, since each service entry is now very detailed
+                if len(results) > 3:
+                    return f"Found {len(results)} services matching the category or keyword. Here are the top 3 best matching services:\n\n" + "\n\n".join(results[:3])
+                
+                return "\n\n".join(results)
             except Exception as e:
-                logger.error(f"Error fetching details: {e}")
-                return f"Error: Failed to fetch service details. {e}"
+                logger.error(f"Error searching services: {e}")
+                return f"Error: Failed to search services. {e}"
 
 
 
@@ -343,73 +269,14 @@ async def entrypoint(ctx: JobContext):
         # voice="Autonoe",
         voice="Leda",
         proactivity=True,
-        temperature=0.5,
-        instructions="You are a helpful assistant",
-        realtime_input_config=types.RealtimeInputConfig(
-        automatic_activity_detection=types.AutomaticActivityDetection(
-          # 1. Turn Gemini's built-in VAD back ON
-        disabled=False, 
-        
-        # 2. THE LATENCY KILLER: How long to wait in silence before replying
-        silence_duration_ms=300, 
-        
-        # 3. How quickly it decides the user has STARTED speaking
-        prefix_padding_ms=20,
-        
-        # 4. Sensitivity tunings
-        start_of_speech_sensitivity="START_SENSITIVITY_HIGH",
-        end_of_speech_sensitivity="END_SENSITIVITY_HIGH",
-        
-      ),
-   ),   
-    ),)
-
-    from livekit.agents.voice.events import AgentState as VoiceAgentState
-    from livekit.agents.llm.realtime import RealtimeError
-    
-    session_state = {
-        "agent_state": "initializing",
-        "last_active": time.time()
-    }
-
-    @session.on("agent_state_changed")
-    def on_state_changed(state: VoiceAgentState):
-        st_str = getattr(state, "new_state", state)
-        new_state = str(st_str).lower()
-        logger.info(f"[AGENT STATE] {new_state}")
-        session_state["agent_state"] = new_state
-        session_state["last_active"] = time.time()
-
-
-    @session.on("user_input_transcribed")
-    def on_user_input_transcribed(ev):
-        # Reset the timer whenever ANY speech is detected (final or interim)
-        if getattr(ev, "transcript", None):
-            session_state["last_active"] = time.time()
-            
-            # Print the transcript to the console.
-            # If it's final, add a tag to differentiate it from the interim streaming text.
-            prefix = "[USER FINAL]" if getattr(ev, "is_final", False) else "[USER INTERIM]"
-            logger.info(f"{prefix} {ev.transcript}")
-
-    @session.on("conversation_item_added")
-    def on_conversation_item_added(ev):
-        # The realtime model pushes conversation items; we catch the assistant side here
-        item = getattr(ev, "item", None)
-        if getattr(item, "role", None) == "assistant" and getattr(item, "content", None):
-            logger.info(f"[AGENT] {item.content}")
-            session_state["last_active"] = time.time()
-
-    # Bind the active session to the custom Logger Filter so it can catch 1008 drops
-    nudge_filter.active_session = session
+        temperature=0.8,
+        instructions="You are a helpful assistant",),
+    )
 
     await session.start(
         agent=DefaultAgent(),
         room=ctx.room,
         room_options=room_io.RoomOptions(
-            text_output=room_io.TextOutputOptions(
-                sync_transcription=True
-            ),
             audio_input=room_io.AudioInputOptions(
                 noise_cancellation=lambda params: noise_cancellation.BVCTelephony() if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP else noise_cancellation.BVC(),
             ),
@@ -421,66 +288,11 @@ async def entrypoint(ctx: JobContext):
     
     await background_audio.start(room=ctx.room, agent_session=session)
 
-    async def nudge_loop():
-        await asyncio.sleep(5) # Let the agent boot up first
-        while True:
-            await asyncio.sleep(1) # Check every 1 second
-            
-            # If the agent is listening AND 10+ seconds passed without any interim transcripts
-            if ("listening" in session_state["agent_state"] and 
-                (time.time() - session_state["last_active"]) > 10):
-                logger.info("[NUDGE ENGINE] User is silent. Prompting agent to speak.")
-                
-                # Reset the timer so it doesn't spam
-                session_state["last_active"] = time.time()
-                
-                # Generate the nudge reply with a strict, short timeout to fail faster
-                try:
-                    # Snappy 1.5-second timeout to quickly catch dead sockets
-                    async with asyncio.timeout(1.5):
-                        await session.generate_reply(
-                            instructions="The user has been silent for a while. Ask them a short, polite question to check if they are still there and if they need help.",
-                            allow_interruptions=True,
-                        )
-                except (TimeoutError, RealtimeError) as e:
-                    logger.debug(f"[NUDGE ENGINE] Gemini API dropped the ping ({type(e).__name__}). Triggering rapid backup nudge...")
-                    
-                    # Separate, inline thread to trigger the recovery immediately
-                    async def quick_backup_nudge():
-                        await asyncio.sleep(0.5)
-                        
-                        # Abort the backup if the original ping managed to successfully transition the agent
-                        if "listening" not in session_state["agent_state"]:
-                            return
-                            
-                        try:
-                            await session.generate_reply(
-                                instructions="The user has been silent for a while. Ask them a short, polite question to check if they are still there and if they need help.",
-                                allow_interruptions=True,
-                            )
-                        except Exception:
-                            pass
-
-                    asyncio.create_task(quick_backup_nudge())
-                    # Reset the main timer back to 0 so the primary loop doesn't double-fire
-                    session_state["last_active"] = time.time()
-                except APIError:
-                    # Socket dropped; the global @session.on("error") handler will catch this and trigger the 2s recovery
-                    session_state["last_active"] = time.time()
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    logger.error(f"[NUDGE ENGINE] Failed to generate reply: {e}")
-                    session_state["last_active"] = time.time() # Reset timer on general failure
-
-    # Start the non-blocking background task
-    asyncio.create_task(nudge_loop())
-
     # Add this guard to ensure the agent only speaks first in an inbound scenario.
     if phone_number is None:
         await session.generate_reply(
             instructions="""Greet user with \" हेलो, नमस्ते आई एम नेहा कॉलिंग फ्रॉम यस मैडम। \"""",
-            allow_interruptions=True,
+            allow_interruptions=False,
         )
 
 if __name__ == "__main__":
@@ -488,4 +300,3 @@ if __name__ == "__main__":
 
 
 
-# - You can use tools to get the information related too.

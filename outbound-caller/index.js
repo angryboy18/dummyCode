@@ -32,7 +32,7 @@ app.post('/call', async (req, res) => {
     console.log(`Dispatching agent 'dummyCode' to room '${roomName}' for outbound call to ${phone_number}...`);
 
     try {
-        const dispatch = await dispatchClient.createDispatch(roomName, "dummyCode", {
+        const dispatch = await dispatchClient.createDispatch(roomName, "dummyCode1", {
             metadata: JSON.stringify({ phone_number })
         });
 
