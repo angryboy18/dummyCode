@@ -340,7 +340,7 @@ End of rules."
 
 
 
-server = AgentServer(agent_name="dummyCode_V2")
+server = AgentServer()
 
 @server.rtc_session(agent_name="dummyCode_V2")
 async def entrypoint(ctx: JobContext):
