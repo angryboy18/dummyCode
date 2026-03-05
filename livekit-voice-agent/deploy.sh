@@ -37,7 +37,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --min-instances=1 \
   --max-instances=5 \
   --concurrency=4 \
-  --port=8081 \
+  --port=8080 \
   --no-allow-unauthenticated \
   --set-env-vars="LIVEKIT_URL=${LIVEKIT_URL}" \
   --set-env-vars="LIVEKIT_API_KEY=${LIVEKIT_API_KEY}" \

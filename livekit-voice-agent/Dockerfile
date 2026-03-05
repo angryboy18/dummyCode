@@ -9,7 +9,7 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS base
 ENV PYTHONUNBUFFERED=1
 
 # GCP Cloud Run injects PORT env var; LiveKit agent HTTP health-check listens here
-ENV PORT=8081
+ENV PORT=8080
 
 # Create a non-privileged user for security
 ARG UID=10001
@@ -22,7 +22,8 @@ RUN adduser \
   appuser
 
 # Install build dependencies for native Python extensions
-RUN apt-get update && apt-get install -y \
+RUN sed -i 's/deb.debian.org/mirror.us-central1.gcp.debian.org/g' /etc/apt/sources.list.d/debian.sources || true && \
+  apt-get update && apt-get install -y \
   gcc \
   g++ \
   python3-dev \
