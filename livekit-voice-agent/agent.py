@@ -340,7 +340,7 @@ End of rules."
 
 
 
-server = AgentServer()
+server = AgentServer(agent_name="dummyCode_V2")
 
 @server.rtc_session(agent_name="dummyCode_V2")
 async def entrypoint(ctx: JobContext):
@@ -614,6 +614,7 @@ if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
+            agent_name="dummyCode_V2",
             port=int(os.getenv("PORT", 8080)),
         )
     )
