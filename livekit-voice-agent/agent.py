@@ -355,7 +355,7 @@ async def entrypoint(ctx: JobContext):
     phone_number = job_metadata.get("phone_number")
     campaign_id = job_metadata.get("campaign_id")
     customer_name = job_metadata.get("name", "Ma'am")
-    trunk_id = job_metadata.get("trunk_id", os.getenv("Trunk_ID", "ST_gL3qKS6ftTEi"))
+    trunk_id = job_metadata.get("trunk_id", os.getenv("Trunk_ID", "ST_xTmqUEnqWKwQ"))
     room_name = ctx.room.name
 
     logger.info(f"Job Metadata: phone={phone_number}, campaign={campaign_id}, "
