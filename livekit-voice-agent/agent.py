@@ -20,6 +20,7 @@ from livekit.agents import (
     JobContext,
     cli,
     room_io,
+    WorkerOptions,
 )
 from livekit.plugins import noise_cancellation
 from livekit.plugins import google
