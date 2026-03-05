@@ -613,7 +613,7 @@ async def entrypoint(ctx: JobContext):
 if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
-            entrypoint_fnc=server,
+            entrypoint_fnc=entrypoint,
             port=int(os.getenv("PORT", 8080)),
         )
     )
