@@ -22,8 +22,7 @@ RUN adduser \
   appuser
 
 # Install build dependencies for native Python extensions
-RUN sed -i 's/deb.debian.org/mirror.us-central1.gcp.debian.org/g' /etc/apt/sources.list.d/debian.sources || true && \
-  apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
   gcc \
   g++ \
   python3-dev \
