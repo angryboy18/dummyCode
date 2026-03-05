@@ -1,72 +1,51 @@
-# This is an example Dockerfile that builds a minimal container for running LK Agents
-# For more information on the build process, see https://docs.livekit.io/agents/ops/deployment/builds/
+# Dockerfile for GCP Cloud Run deployment of LiveKit Voice Agent
 # syntax=docker/dockerfile:1
 
-# Use the official UV Python base image with Python 3.13 on Debian Bookworm
-# UV is a fast Python package manager that provides better performance than pip
-# We use the slim variant to keep the image size smaller while still having essential tools
+# ── Stage 1: Base image with UV + Python 3.13 ──
 ARG PYTHON_VERSION=3.13
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS base
 
-# Keeps Python from buffering stdout and stderr to avoid situations where
-# the application crashes without emitting any logs due to buffering.
+# Prevent Python from buffering stdout/stderr (critical for Cloud Run logging)
 ENV PYTHONUNBUFFERED=1
 
-# Create a non-privileged user that the app will run under.
-# See https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#user
+# GCP Cloud Run injects PORT env var; LiveKit agent HTTP health-check listens here
+ENV PORT=8081
+
+# Create a non-privileged user for security
 ARG UID=10001
 RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/app" \
-    --shell "/sbin/nologin" \
-    --uid "${UID}" \
-    appuser
+  --disabled-password \
+  --gecos "" \
+  --home "/app" \
+  --shell "/sbin/nologin" \
+  --uid "${UID}" \
+  appuser
 
-# Install build dependencies required for Python packages with native extensions
-# gcc: C compiler needed for building Python packages with C extensions
-# g++: C++ compiler needed for building Python packages with C++ extensions
-# python3-dev: Python development headers needed for compilation
-# We clean up the apt cache after installation to keep the image size down
+# Install build dependencies for native Python extensions
 RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    python3-dev \
+  gcc \
+  g++ \
+  python3-dev \
   && rm -rf /var/lib/apt/lists/*
 
-# Create a new directory for our application code
-# And set it as the working directory
 WORKDIR /app
 
-# Copy just the dependency files first, for more efficient layer caching
+# ── Stage 2: Install dependencies (cached layer) ──
 COPY pyproject.toml uv.lock ./
 RUN mkdir -p src
-
-# Install Python dependencies using UV's lock file
-# --locked ensures we use exact versions from uv.lock for reproducible builds
-# This creates a virtual environment and installs all dependencies
-# Ensure your uv.lock file is checked in for consistency across environments
 RUN uv sync --locked
 
-# Copy all remaining pplication files into the container
-# This includes source code, configuration files, and dependency specifications
-# (Excludes files specified in .dockerignore)
+# ── Stage 3: Copy application code ──
 COPY . .
-
-# Change ownership of all app files to the non-privileged user
-# This ensures the application can read/write files as needed
 RUN chown -R appuser:appuser /app
 
-# Switch to the non-privileged user for all subsequent operations
-# This improves security by not running as root
 USER appuser
 
-# Pre-download any ML models or files the agent needs
-# This ensures the container is ready to run immediately without downloading
-# dependencies at runtime, which improves startup time and reliability
+# Pre-download ML models (Silero VAD, turn-detector, etc.) at build time
 RUN uv run "agent.py" download-files
 
-# Run the application using UV
-# UV will activate the virtual environment and run the agent.
-# The "start" command tells the worker to connect to LiveKit and begin waiting for jobs.
+# Expose the health-check port for Cloud Run
+EXPOSE ${PORT}
+
+# Start the LiveKit agent worker
 CMD ["uv", "run", "agent.py", "start"]
