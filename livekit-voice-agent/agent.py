@@ -42,13 +42,15 @@ class SuppressLivekitNudgeTraceback(logging.Filter):
     def filter(self, record):
         if record.levelno >= logging.ERROR:
             msg = record.getMessage()
-            # Silently suppress realtime reply task errors (normal during user interruptions)
-            if "Error in _realtime_reply_task" in msg:
-                return False
-            # Only trigger recovery for actual socket drops (1008)
-            if "error in receive task: 1008" in msg:
+            
+            # Trigger recovery for both socket drops (1008) AND realtime reply task errors
+            is_socket_drop = "error in receive task: 1008" in msg
+            is_reply_error = "Error in _realtime_reply_task" in msg
+            
+            if is_socket_drop or is_reply_error:
+                error_type = "1008 Socket Drop" if is_socket_drop else "Realtime Reply Error"
                 if self.active_session:
-                    logger.warning("[ERROR RECOVERY] Gemini 1008 detected. Firing recovery nudge in 2s.")
+                    logger.warning(f"[ERROR RECOVERY] {error_type} detected. Firing recovery nudge in 2s.")
                     async def global_quick_recovery():
                         await asyncio.sleep(2.0)
                         try:
@@ -516,11 +518,20 @@ async def entrypoint(ctx: JobContext):
         nonlocal user_speech_start
         user_speech_start = time.time()
         session_state["last_active"] = time.time()  # Block nudge while user is speaking
+        logger.debug("[INTERIM] User speech started")
+
+    @session.on("user_input_transcribed")
+    def on_user_input_transcribed(ev):
+        transcript = getattr(ev, "transcript", "") or getattr(ev, "text", "")
+        is_final = getattr(ev, "is_final", False)
+        logger.info(f"[INTERIM] {'FINAL' if is_final else 'PARTIAL'}: {transcript}")
+        session_state["last_active"] = time.time()  # Block nudge on any interim input
 
     @session.on("agent_speech_started")
     def on_agent_speech_start(_):
         nonlocal agent_speech_start
         agent_speech_start = time.time()
+        session_state["last_active"] = time.time()  # Block nudge while agent is speaking
 
     @session.on("conversation_item_added")
     def on_conversation_item_added(ev):
@@ -586,56 +597,33 @@ async def entrypoint(ctx: JobContext):
 
     async def nudge_loop():
         await asyncio.sleep(8)  # Let the agent boot up first
+        is_nudging = False
         while True:
             await asyncio.sleep(1)  # Check every 1 second
             
-            # If the agent is listening AND 10+ seconds passed without any interim transcripts
+            # Skip if a nudge is already in progress
+            if is_nudging:
+                continue
+            
+            # If the agent is listening AND 10+ seconds passed without activity
             if ("listening" in session_state["agent_state"] and 
                 (time.time() - session_state["last_active"]) > 10):
                 logger.info("[NUDGE ENGINE] User is silent. Prompting agent to speak.")
+                is_nudging = True
                 
-                # Reset the timer so it doesn't spam
-                session_state["last_active"] = time.time()
-                
-                # Generate the nudge reply with a strict, short timeout to fail faster
                 try:
-                    # Snappy 1.5-second timeout to quickly catch dead sockets
-                    async with asyncio.timeout(1.5):
-                        await session.generate_reply(
-                            instructions="The user has been silent for a while. Ask them a short, polite question to check if they are still there and if they need help.",
-                            allow_interruptions=True,
-                        )
-                except asyncio.TimeoutError:
-                    logger.debug(f"[NUDGE ENGINE] Gemini API dropped the ping (TimeoutError). Triggering rapid backup nudge...")
-                    
-                    # Separate, inline thread to trigger the recovery immediately
-                    async def quick_backup_nudge():
-                        await asyncio.sleep(0.5)
-                        
-                        # Abort the backup if the original ping managed to successfully transition the agent
-                        if "listening" not in session_state["agent_state"]:
-                            return
-                            
-                        try:
-                            await session.generate_reply(
-                                instructions="The user has been silent for a while. Ask them a short, polite question to check if they are still there and if they need help.",
-                                allow_interruptions=True,
-                            )
-                        except Exception:
-                            pass
-
-                    asyncio.create_task(quick_backup_nudge())
-                    # Reset the main timer back to 0 so the primary loop doesn't double-fire
-                    session_state["last_active"] = time.time()
+                    await session.generate_reply(
+                        instructions="The user has been silent for a while. Ask them a short, polite question to check if they are still there and if they need help.",
+                        allow_interruptions=True,
+                    )
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    # Generic catch-all prevents breaking the heartbeat if the API natively resets connection sockets natively
-                    if "1008" in str(e):
-                        session_state["last_active"] = time.time()
-                    else:
-                        logger.error(f"[NUDGE ENGINE] Failed to generate reply: {e}")
-                        session_state["last_active"] = time.time() # Reset timer on general failure
+                    logger.error(f"[NUDGE ENGINE] Failed to generate reply: {e}")
+                finally:
+                    # Reset timer AFTER nudge completes (not before)
+                    session_state["last_active"] = time.time()
+                    is_nudging = False
 
     # Start the non-blocking background task
     asyncio.create_task(nudge_loop())
