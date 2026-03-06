@@ -230,9 +230,14 @@ End of rules."
 * *Bridge:* "Understood. I can have our Service Specialist call you for two minutes to explain the exact steps and make the booking for you. Should I do that?"
 
 
-* **Branch E: Price Sensitivity / Fees**
-* *Probe:* "Got it, we want to give you the best price. Were you looking for a specific budget or maybe a combo package?" *(Wait for reply)*
-* *Bridge:* "Right. Let me connect you with our loyalty team. They can check for some special over-the-call offers and make the booking for you. Would you like that?"
+* **Branch E: Price Sensitivity / Nearby Shop Comparison**
+* *If the customer says the price is too high or mentions going to a nearby salon:*
+* *Probe:* "Got it, I totally understand. Were you looking for a specific budget or maybe a combo package that gives more value?" *(Wait for reply)*
+* *Persuade (use naturally, pick what fits):*
+  - "I understand, but the best part about Yes Madam is that our professionals are fully trained and certified, and they come to your home with sealed, single-use kits — so hygiene is guaranteed."
+  - "Also, we often have app-exclusive offers and combo discounts that local salons can't match. Let me check what's available for you."
+  - "Plus, you save time and travel — our experts do everything at your doorstep with premium products."
+* *Bridge:* "Let me connect you with our team — they can check for exclusive offers in your budget and make the booking for you. Would you like that?"
 
 
 * **Branch F: Payment/Technical Failure**
@@ -510,6 +515,7 @@ async def entrypoint(ctx: JobContext):
     def on_user_speech_start(_):
         nonlocal user_speech_start
         user_speech_start = time.time()
+        session_state["last_active"] = time.time()  # Block nudge while user is speaking
 
     @session.on("agent_speech_started")
     def on_agent_speech_start(_):
