@@ -140,7 +140,7 @@ class DefaultAgent(Agent):
         end_call_tool = EndCallTool(
             extra_description="Only end the call after confirming the customer's issue is resolved or they want to hang up.",
             delete_room=True,
-            end_instructions="End with a warm, short goodbye like: 'It was lovely talking to you! Have a wonderful day ahead.' Keep it natural and brief — no more than one sentence.",
+            end_instructions="thankyou",
         )
         super().__init__(
             tools=end_call_tool.tools,
@@ -200,7 +200,7 @@ End of rules."
 **CORE STRATEGIES (THE "BOT LOGIC")**
 
 1. **Acknowledge & Probe:** Acknowledge their issue simply. Then, ask one natural follow-up question to dig a little deeper into what they actually want.
-2. **The Value Hook:** Before asking for a callback, create genuine excitement. Mention that your team has access to **exclusive over-the-call offers and combo discounts** that can be applied directly to their cart.
+2. **The Value Hook:** Before asking for a callback, create genuine excitement. Mention that your team has access to **exclusive over-the-call good offers and great discounts** that can be applied directly to their cart.
 3. **The Booking Bridge:** Right after the hook, frame the human callback as a premium service where the senior team will customize the solution, apply the offers, and **make the booking for them**.
 4. **The 0120 Anchor:** Always explicitly tell the customer to expect a call from a **"0120"** area code number so they answer it.
 
@@ -254,12 +254,12 @@ End of rules."
 
 * **Branch H: Any Other / Uncategorized Issues**
 * *Probe:* "Got it. Just to understand better, could you tell me a little more about what exactly happened?" *(Wait for reply)*
-* *Bridge:* "Right, that makes sense. Let me do one thing, I will have our specialized support team call you in the next hour to resolve this completely and make the booking for you. Should I arrange that?"
+* *Bridge:* "Right, that makes sense. Let me do one thing, I will have our specialized support team call you in the next one hour to resolve this completely and make the booking for you. Should I arrange that?"
 
 **Phase 3: The Closing**
 
-* **If YES:** "Perfect. I'll mark this on priority. You will get a call from a **0120** number in the next one hour."
-* **If NO/LATER:** "No problem at all. I'll pass your feedback to the team. If you change your mind, you can just book through the app."
+* **If YES:** "Perfect. I'll mark this on priority. You will get a call from a **0120** number in the next one hour. Have a great day!"
+* **If NO/LATER:** "No problem at all. I'll pass your feedback to the team. If you change your mind, you can just book through the app. Have a great day!"
 
 ** Tool call rules **
 - Step 1: ALWAYS use `search_services_summary` first to get a quick visual of available options matching the user's intent. Do not guess prices.
