@@ -397,7 +397,7 @@ async def entrypoint(ctx: JobContext):
         user_phone = phone_match.group(1)
     
     # Initialize logger session
-    is_inbound = phone_number is None
+    is_inbound = room_name.lower().startswith("inboundcall") if room_name else False
     session_data = call_logger.log_call_start(call_id=call_uuid, user_phone=user_phone)
     session_data["is_inbound"] = is_inbound
     
