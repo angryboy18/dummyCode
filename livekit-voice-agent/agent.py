@@ -409,8 +409,7 @@ async def entrypoint(ctx: JobContext):
     
     # Initialize logger session
     is_inbound = room_name.lower().startswith("inboundcall") if room_name else False
-    session_data = call_logger.log_call_start(call_id=call_uuid, user_phone=user_phone)
-    session_data["is_inbound"] = is_inbound
+    session_data = call_logger.log_call_start(call_id=call_uuid, user_phone=user_phone, is_inbound=is_inbound)
     
     egress_id, recording_filepath = await start_call_recording(ctx, call_uuid)
     if recording_filepath:

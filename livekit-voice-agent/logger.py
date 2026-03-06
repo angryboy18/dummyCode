@@ -95,7 +95,7 @@ class CallLogger:
             logger.error(f"Failed to init MongoDB: {e}")
             self.mongo_client = None
     
-    def log_call_start(self, call_id: str, user_phone: str) -> Dict[str, Any]:
+    def log_call_start(self, call_id: str, user_phone: str, is_inbound: bool = False) -> Dict[str, Any]:
         """
         Initialize session data at call start.
         Returns a session_data dict to be passed to log_call_end.
@@ -110,7 +110,8 @@ class CallLogger:
             "tools_used": [],
             "disconnect_reason": "unknown",
             "transcript_uri": "",
-            "recording_url": ""
+            "recording_url": "",
+            "is_inbound": is_inbound
         }
         # Create or update an initial MongoDB record so the call appears
         # in analytics even if the worker crashes mid-call.
@@ -444,7 +445,7 @@ class CallLogger:
                 "agentId": ObjectId(agent_id) if agent_id else None,
                 "clientId": ObjectId(client_id) if client_id else None,
                 "customer_phone_number": user_phone,
-                "call_type": "outbound",
+                "call_type": "inbound" if session_data.get("is_inbound") else "outbound",
                 "agent_phone_number": os.getenv("AGENT_PHONE_NUMBER", ""),
                 "shared_state": shared_state,
                 "hand_off": hand_off,
@@ -559,7 +560,7 @@ class CallLogger:
             "agentId": ObjectId(agent_id) if agent_id else None,
             "clientId": ObjectId(client_id) if client_id else None,
             "customer_phone_number": user_phone,
-            "call_type": "inbound",
+            "call_type": "inbound" if session_data.get("is_inbound") else "outbound",
             "agent_phone_number": os.getenv("AGENT_PHONE_NUMBER", ""),
             "shared_state": shared_state,
             "hand_off": hand_off,
