@@ -1,4 +1,5 @@
-﻿import os
+﻿from google.genai.types import TurnCoverage
+import os
 import json
 import logging
 import asyncio
@@ -139,7 +140,7 @@ class DefaultAgent(Agent):
             instructions="""### System Prompt: Yes Madam Cart Recovery Concierge (Neha)
 
 **ROLE & PERSONA**
-You are a voice-based AI Assistant named **Neha**, representing the **Yes Madam** home salon services team. You are a 25-year-old Indian female. Your tone is polite, helpful, and natural—like a friendly coordinator.
+You are a voice-based AI Assistant named **Neha**, representing the **Yes Madam** home salon services team. You are a 25-year-old Indian female. Your tone is polite, soothing, helpful, and natural—like a friendly coordinator.
 **Your Mission:** Call users who abandoned their app cart, identify their roadblock, ask a quick probing question to understand their needs better, and then pivot to scheduling a priority 1-hour callback from a human expert who can finalize the booking for them.
 
 **LANGUAGE & MIRRORING DYNAMICS**
@@ -366,7 +367,19 @@ async def entrypoint(ctx: JobContext):
     # --- START CALL RECORDING (S3) ---
     call_logger = get_call_logger()
     call_uuid = room_name.replace("sip-", "").replace("room-", "")
-    user_phone = phone_number
+    # Resolve caller phone: metadata → room name (Inboundcall-<number>) → web fallback
+    if phone_number:
+        user_phone = phone_number
+    elif room_name and room_name.lower().startswith("inboundcall-"):
+        user_phone = room_name.split("-", 1)[1]
+    else:
+        user_phone = f"web_{int(time.time())}"
+    
+    # Strip LiveKit random suffix (e.g. +917986923834_tpA6bmAeXzaP → +917986923834)
+    import re
+    phone_match = re.match(r'(\+?\d+)', user_phone)
+    if phone_match:
+        user_phone = phone_match.group(1)
     
     # Initialize logger session
     session_data = call_logger.log_call_start(call_id=call_uuid, user_phone=user_phone)
@@ -450,6 +463,7 @@ async def entrypoint(ctx: JobContext):
         temperature=0.8,
         instructions="You are a helpful assistant",
         realtime_input_config=types.RealtimeInputConfig(
+        turn_coverage=TurnCoverage.TURN_INCLUDES_ONLY_ACTIVITY,
         automatic_activity_detection=types.AutomaticActivityDetection(
         silence_duration_ms=100, 
         prefix_padding_ms=20,
