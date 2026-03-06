@@ -72,6 +72,11 @@ logging.getLogger("livekit.plugins.google").addFilter(nudge_filter)
 
 load_dotenv(".env.local")
 
+# Silence noisy PyMongo heartbeat/topology logs
+logging.getLogger("pymongo").setLevel(logging.ERROR)
+logging.getLogger("pymongo.topology").setLevel(logging.ERROR)
+logging.getLogger("pymongo.connection").setLevel(logging.ERROR)
+
 # Load services once at startup for high-speed access
 try:
     with open(os.path.join(os.path.dirname(__file__), "services.json"), 'r', encoding='utf-8') as f:
@@ -133,7 +138,7 @@ class DefaultAgent(Agent):
         end_call_tool = EndCallTool(
             extra_description="Only end the call after confirming the customer's issue is resolved or they want to hang up.",
             delete_room=True,
-            end_instructions="Thank the customer for their time and wish them a good day.",
+            end_instructions="End with a warm, short goodbye like: 'It was lovely talking to you! Have a wonderful day ahead.' Keep it natural and brief — no more than one sentence.",
         )
         super().__init__(
             tools=end_call_tool.tools,
@@ -142,6 +147,10 @@ class DefaultAgent(Agent):
 **ROLE & PERSONA**
 You are a voice-based AI Assistant named **Neha**, representing the **Yes Madam** home salon services team. You are a 25-year-old Indian female. Your tone is polite, soothing, helpful, and natural—like a friendly coordinator.
 **Your Mission:** Call users who abandoned their app cart, identify their roadblock, ask a quick probing question to understand their needs better, and then pivot to scheduling a priority 1-hour callback from a human expert who can finalize the booking for them.
+
+**GENDER RULES (Strict)**
+* **Customer Addressing:** Always be **gender-neutral** when addressing the customer. Do NOT assume their gender. Never use "Ma'am", "Sir", "Madam", "bhaiya", "didi", "bhai" etc. Use neutral terms like "aap", "you", or simply their name if available.
+* **Self-Reference:** When referring to yourself (Neha), always use **feminine** language. In Hindi, use feminine verb forms (e.g., "मैं बता रही हूँ", "मैंने सोचा"). In English, use "I" naturally without gender markers.
 
 **LANGUAGE & MIRRORING DYNAMICS**
 STRICT ENFORCEMENT RULES:>
@@ -249,6 +258,7 @@ End of rules."
 * Acknowledge quickly ("Got it", "Right", "I understand").
 * Always anchor the "0120" area code before hanging up.
 * **Crucial:** Always use the term **"cash and carry"** when referring to paying later (never use the word "advance").
+* **Gender-Neutral:** Never assume the customer's gender. Do not use Sir/Ma'am/Madam/bhaiya/didi.
 
 * **RED ZONE (Never Do):**
 * **Never pass emojies or any special characters in the response, or tool input / output.**
@@ -357,7 +367,7 @@ async def entrypoint(ctx: JobContext):
 
     phone_number = job_metadata.get("phone_number")
     campaign_id = job_metadata.get("campaign_id")
-    customer_name = job_metadata.get("name", "Ma'am")
+    customer_name = job_metadata.get("name", "Customer")
     trunk_id = job_metadata.get("trunk_id", os.getenv("Trunk_ID", "ST_xTmqUEnqWKwQ"))
     room_name = ctx.room.name
 
@@ -375,14 +385,16 @@ async def entrypoint(ctx: JobContext):
     else:
         user_phone = f"web_{int(time.time())}"
     
-    # Strip LiveKit random suffix (e.g. +917986923834_tpA6bmAeXzaP → +917986923834)
+    # Strip LiveKit random suffix (e.g. _+919793370370_RPH2omkdxWkB → +919793370370)
     import re
-    phone_match = re.match(r'(\+?\d+)', user_phone)
+    phone_match = re.search(r'(\+?\d{10,})', user_phone)
     if phone_match:
         user_phone = phone_match.group(1)
     
     # Initialize logger session
+    is_inbound = phone_number is None
     session_data = call_logger.log_call_start(call_id=call_uuid, user_phone=user_phone)
+    session_data["is_inbound"] = is_inbound
     
     egress_id, recording_filepath = await start_call_recording(ctx, call_uuid)
     if recording_filepath:
@@ -402,17 +414,20 @@ async def entrypoint(ctx: JobContext):
                 
             if campaign_id and campaign_id != "unknown_campaign" and call_log_id:
                 logger.info(f"Campaign result: logging campaign_id={campaign_id}, call_log_id={call_log_id}")
-                # Derive status from transcript
-                items = session_data.get("transcript", [])
-                if not items:
-                    answered = "unanswered"
+                # Derive status from transcript (inbound = always answered)
+                if session_data.get("is_inbound"):
+                    answered = "answered"
                 else:
-                    text_content = " ".join(i.get("text", "") for i in items).lower()
-                    voicemail_keywords = ["voicemail", "leave a message", "after the beep", "please record"]
-                    if any(keyword in text_content for keyword in voicemail_keywords):
-                        answered = "voice mail"
+                    items = session_data.get("transcript", [])
+                    if not items:
+                        answered = "unanswered"
                     else:
-                        answered = "answered"
+                        text_content = " ".join(i.get("text", "") for i in items).lower()
+                        voicemail_keywords = ["voicemail", "leave a message", "after the beep", "please record"]
+                        if any(keyword in text_content for keyword in voicemail_keywords):
+                            answered = "voice mail"
+                        else:
+                            answered = "answered"
                         
                 log_outbound_call_result(
                     campaign_id=campaign_id,
@@ -564,7 +579,7 @@ async def entrypoint(ctx: JobContext):
     await background_audio.start(room=ctx.room, agent_session=session)
 
     async def nudge_loop():
-        await asyncio.sleep(5)  # Let the agent boot up first
+        await asyncio.sleep(8)  # Let the agent boot up first
         while True:
             await asyncio.sleep(1)  # Check every 1 second
             

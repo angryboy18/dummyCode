@@ -272,23 +272,24 @@ class CallLogger:
             client = genai.Client(api_key=google_api_key)
             
             prompt = f"""
-            Extract the following entities from the call transcript of a recruitment call.
+            Extract the following entities from the call transcript of a Yes Madam cart recovery call.
             Return a JSON list of key-value pairs.
             
             Entities to extract:
-            - User Shown Interest for Callback ( YES/NO) Yes : only after Riya says Sales team will call you back and user agrees for that then only consider it user is interested.
-            - Call Back : ENUM ( YES/NO)
-            - Special Request : Summary of request
-            - Negative : ENUM ( YES/NO)
+            - Reason for Dropoff : The exact reason the customer didn't complete their booking (e.g. "slots not available", "too expensive", "confused by options", "payment failed", "out of service area"). Be specific and concise.
+            - Agreed for Callback : ENUM (YES / NO) - Did the customer agree to receive a callback from the senior team?
+            - Preferred Callback Time : The specific time/slot the customer requested for the callback (e.g. "evening 6pm", "tomorrow morning"). If not mentioned, put "Not specified".
+            - Special Request : Any special request or preference the customer mentioned (e.g. "wants same beautician as last time", "needs hypoallergenic products"). If none, put "None".
             
             Transcript:
             {transcript_text}
             
             Return ONLY a JSON list, for example:
             [
-              {{"key": "User Shown Interest for Callback ( YES/NO)", "value": "NO"}},
-              {{"key": "Call Back", "value": "NO"}},
-              ...
+              {{"key": "Reason for Dropoff", "value": "slots were not available for preferred time"}},
+              {{"key": "Agreed for Callback", "value": "YES"}},
+              {{"key": "Preferred Callback Time", "value": "evening around 6pm"}},
+              {{"key": "Special Request", "value": "None"}}
             ]
             """
             
@@ -338,16 +339,19 @@ class CallLogger:
         session_data["disconnect_reason"] = disconnect_reason
 
         # --- Status (answered / voice mail / unanswered) ---
-        items = session_data.get("transcript", [])
-        if not items:
-            answered = "unanswered"
+        if session_data.get("is_inbound"):
+            answered = "answered"
         else:
-            text_content = " ".join(t.get("text", "") for t in items).lower()
-            voicemail_keywords = ["voicemail", "leave a message", "after the beep", "please record"]
-            if any(keyword in text_content for keyword in voicemail_keywords):
-                answered = "voice mail"
+            items = session_data.get("transcript", [])
+            if not items:
+                answered = "unanswered"
             else:
-                answered = "answered"
+                text_content = " ".join(t.get("text", "") for t in items).lower()
+                voicemail_keywords = ["voicemail", "leave a message", "after the beep", "please record"]
+                if any(keyword in text_content for keyword in voicemail_keywords):
+                    answered = "voice mail"
+                else:
+                    answered = "answered"
         session_data["status"] = answered
         print(f"ðŸ“Š Call status derived for {session_data.get('call_id')}: {answered}")
 
